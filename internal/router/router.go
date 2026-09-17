@@ -16,6 +16,7 @@ func Setup(
 	activityH *handler.ActivityHandler,
 	inspectionH *handler.InspectionHandler,
 	traceCodeH *handler.TraceCodeHandler,
+	sampleH *handler.SampleHandler,
 	healthH *handler.HealthHandler,
 	rdb *redis.Client,
 ) *gin.Engine {
@@ -48,6 +49,21 @@ func Setup(
 
 		// Inspections
 		v1.POST("/batches/:id/inspection", inspectionH.Create)
+
+		// Samples (样品台账)
+		v1.POST("/samples", sampleH.Create)
+		v1.GET("/samples", sampleH.List)
+		v1.GET("/samples/stats", sampleH.Stats)
+		v1.GET("/samples/retentions/expired", sampleH.ListExpiredRetentions)
+		v1.GET("/samples/:id", sampleH.GetByID)
+		v1.POST("/samples/:id/retention", sampleH.UpdateRetention)
+		v1.POST("/samples/:id/void", sampleH.Void)
+		v1.POST("/samples/:id/dispose", sampleH.Dispose)
+
+		// Sample transfers & conclusions (送检交接与检测结论)
+		v1.POST("/sample-transfers", sampleH.CreateTransfer)
+		v1.GET("/sample-transfers/:id", sampleH.GetTransfer)
+		v1.POST("/sample-conclusions", sampleH.CreateConclusion)
 
 		// Trace codes
 		v1.POST("/batches/:id/codes", traceCodeH.Generate)

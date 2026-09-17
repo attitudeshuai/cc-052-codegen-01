@@ -38,6 +38,19 @@ POST /api/v1/batches/{id}/inspection        上传检测结果
 POST /api/v1/batches/{id}/codes             生成溯源码（返回数量与短码列表）
 GET  /api/v1/trace/{code}                   公开溯源查询（无需鉴权，限流）
 GET  /api/v1/trace/{code}/qrcode            返回二维码 PNG（带缓存头）
+
+# 样品台账（取样 → 送检 → 结论 全程跟踪）
+POST /api/v1/samples                        取样登记（地块/作物/取样人/取样时间，样品编号唯一，重号 409 指认）
+GET  /api/v1/samples                        台账列表（?plot_id=&status= 过滤）
+GET  /api/v1/samples/{id}                   样品详情（在途数量 + 交接流水 + 结论）
+POST /api/v1/samples/{id}/retention         登记/修改留样位置（柜子）与到期日
+POST /api/v1/samples/{id}/void              作废样品（作废后不再进入统计）
+POST /api/v1/samples/{id}/dispose           留样处理（destroy 销毁 / extend 延长留存 / retest 送复检）
+GET  /api/v1/samples/retentions/expired     到期未处理留样清单（附处理办法建议）
+GET  /api/v1/samples/stats                  台账统计（不含作废样品，作废数单列）
+POST /api/v1/sample-transfers               交接登记（out 交出去 / in 收回来；收回响应带 missing 短缺样品点名清单）
+GET  /api/v1/sample-transfers/{id}          交接单详情（送出单附对账结果）
+POST /api/v1/sample-conclusions             登记检测结论（重复结论、挂错样品当场 409 指认）
 ```
 
 ## 7. 数据模型
@@ -50,6 +63,14 @@ activity(id, batch_id, client_uuid UNIQUE, kind /* fertilize|pesticide|irrigatio
 input_material(id, name, type, registration_no, safe_interval_days, active_ingredient)
 inspection(id, batch_id, lab, sampled_at, result /* pass|fail */, report_url, items jsonb)
 trace_code(id, batch_id, code UNIQUE, seq, printed_at, first_scanned_at, first_scan_region)
+
+-- 样品台账（migrations/002_sample_ledger.sql）
+sample(id, sample_no UNIQUE /* 不许重号 */, plot_id, crop, sampler, sampled_at, quantity,
+       status /* registered|sent|returned|concluded|void */, cabinet, retain_until,
+       disposed_at, disposal_method, disposed_by, void_reason, note, created_at)
+sample_transfer(id, direction /* out|in */, out_transfer_id, lab, handler, happened_at, created_at)
+sample_transfer_item(id, transfer_id, sample_id, quantity)
+sample_conclusion(id, sample_id UNIQUE /* 一份样品仅一份结论 */, lab, result, concluded_at, report_url, created_at)
 ```
 
 ## 8. 关键实现点
