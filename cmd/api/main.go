@@ -60,6 +60,12 @@ func main() {
 	inputMaterialRepo := repository.NewInputMaterialRepo(db)
 	_ = inputMaterialRepo
 
+	// 样品台账
+	sampleRepo := repository.NewSampleRepo(db)
+	custodyRepo := repository.NewCustodyRepo(db)
+	reserveRepo := repository.NewReserveRepo(db)
+	conclusionRepo := repository.NewConclusionRepo(db)
+
 	// Services
 	farmSvc := service.NewFarmService(farmRepo)
 	plotSvc := service.NewPlotService(plotRepo)
@@ -67,6 +73,7 @@ func main() {
 	activitySvc := service.NewActivityService(activityRepo, batchRepo)
 	inspectionSvc := service.NewInspectionService(inspectionRepo, batchRepo)
 	traceCodeSvc := service.NewTraceCodeService(codeRepo, batchRepo, inspectionRepo, activityRepo, plotRepo, farmRepo)
+	sampleSvc := service.NewSampleService(sampleRepo, custodyRepo, reserveRepo, conclusionRepo, plotRepo, farmRepo, batchRepo)
 
 	// Handlers
 	farmH := handler.NewFarmHandler(farmSvc)
@@ -75,10 +82,11 @@ func main() {
 	activityH := handler.NewActivityHandler(activitySvc)
 	inspectionH := handler.NewInspectionHandler(inspectionSvc)
 	traceCodeH := handler.NewTraceCodeHandler(traceCodeSvc)
+	sampleH := handler.NewSampleHandler(sampleSvc)
 	healthH := handler.NewHealthHandler(db, rdb)
 
 	// Router
-	r := router.Setup(farmH, plotH, batchH, activityH, inspectionH, traceCodeH, healthH, rdb)
+	r := router.Setup(farmH, plotH, batchH, activityH, inspectionH, traceCodeH, sampleH, healthH, rdb)
 
 	srv := &http.Server{
 		Addr:    ":" + cfg.ServerPort,

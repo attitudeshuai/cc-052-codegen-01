@@ -38,6 +38,21 @@ POST /api/v1/batches/{id}/inspection        上传检测结果
 POST /api/v1/batches/{id}/codes             生成溯源码（返回数量与短码列表）
 GET  /api/v1/trace/{code}                   公开溯源查询（无需鉴权，限流）
 GET  /api/v1/trace/{code}/qrcode            返回二维码 PNG（带缓存头）
+
+# 样品台账（取样一路跟到检测结论）
+POST /api/v1/samples                         取样登记（地块/作物/取样人/时间；sample_no 留空自动按天发号，编号唯一不复用）
+GET  /api/v1/samples                         台账列表（可按地块/批次/状态/取样人/时间过滤）
+GET  /api/v1/samples/{idOrNo}                样品全链路（交接、留样、全部结论）
+POST /api/v1/samples/{idOrNo}/void           作废样品（退出统计，编号保留）
+POST /api/v1/samples/{idOrNo}/custodies      交接一笔（direction=send 交出 / return 收回，逐笔对账）
+GET  /api/v1/samples/{idOrNo}/custodies      单样品交出/收回/差额对账
+GET  /api/v1/sample-ledger/shortages         少样当场点名（交出与收回数量对不上的样品清单）
+POST /api/v1/samples/{idOrNo}/reserve        留样登记（柜子、入库、到期日或保留天数）
+POST /api/v1/samples/{idOrNo}/reserve/dispose 到期处置（destroy 销毁 / retain 续存 / return 退回）
+GET  /api/v1/sample-ledger/expired-reserves  到期留样单独列出并给处理办法
+POST /api/v1/samples/{idOrNo}/conclusions    登记检测结论（重复结论 / 报告号挂错样品当场指认，409）
+POST /api/v1/samples/{idOrNo}/conclusions/{cid}/invalidate  指认并作废挂错的结论
+GET  /api/v1/sample-ledger/stats             台账统计（作废样品与作废结论不进分子分母）
 ```
 
 ## 7. 数据模型
@@ -50,6 +65,15 @@ activity(id, batch_id, client_uuid UNIQUE, kind /* fertilize|pesticide|irrigatio
 input_material(id, name, type, registration_no, safe_interval_days, active_ingredient)
 inspection(id, batch_id, lab, sampled_at, result /* pass|fail */, report_url, items jsonb)
 trace_code(id, batch_id, code UNIQUE, seq, printed_at, first_scanned_at, first_scan_region)
+
+-- 样品台账（002_sample_ledger.sql）
+sample(id, sample_no UNIQUE /* YP+yyyyMMdd+4 位流水 */, plot_id, batch_id, crop_id, sampler, sampled_at,
+       quantity, unit, status /* sampled|in_lab|concluded|void */, void_reason, void_at)
+sample_seq(seq_date PK, last_seq)                          -- 按天原子发号
+sample_custody(id, sample_id, direction /* send|return */, quantity, handler_from, handler_to, transferred_at, note)
+sample_reserve(id, sample_id UNIQUE, quantity, cabinet, stored_at, expire_at, disposed_at, dispose_method, note)
+sample_conclusion(id, sample_id, lab, result /* pass|fail */, concluded_at, report_no, report_url, items jsonb,
+                  is_active, invalidate_reason)
 ```
 
 ## 8. 关键实现点
@@ -59,6 +83,11 @@ trace_code(id, batch_id, code UNIQUE, seq, printed_at, first_scanned_at, first_s
 - **图片处理**：上传走预签名 URL 直传 MinIO，服务端只存 key；生成缩略图用于扫码页。
 - **公开接口防护**：`/trace/{code}` 按 IP 限流（Redis 令牌桶，如 30 次/分钟），并对返回体脱敏。
 - **安全间隔期**：发码时 `SELECT max(happened_at)` 与 `harvest_date` 比较，不足则拒绝。
+- **样品台账**（详见 002 迁移）：
+  - 编号唯一：`sample.sample_no` 唯一索引兜底 + `sample_seq` 行级 UPSERT 按天原子发号（UTC+8 作业日），作废也占用编号、永不复用。
+  - 交接对账：每笔交出/收回实时累计，累计交出不得超过取样量、累计收回不得超过在外量，违反即 409 并在 detail 里给出差额；`/sample-ledger/shortages` 把所有未结清样品一次点名。
+  - 留样到期：记柜子与到期日，`/sample-ledger/expired-reserves` 单列到期留样并按状态给处理办法（已结论→销毁、在检→续存、未送检→核实退回）。
+  - 结论防错：部分唯一索引保证一份样品只有一份有效结论、报告号不跨样品重复；第二份结论或同号报告返回 409 指认所挂样品；作废结论/作废样品立即退出 `/stats` 分子分母。
 
 ## 9. 技术约束与性能
 - 所有时间存 UTC，展示按 `region_code` 转换（农事日期以当地日期为准，避免跨零点算错一天）。
